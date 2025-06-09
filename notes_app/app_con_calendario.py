@@ -658,12 +658,28 @@ class NotesApp:
 
         tk.Label(right_frame, text="Contenido de la Nota", font=("Helvetica Neue", 11, "bold"), bg=self.panel_bg, fg=self.fg_color).pack(pady=(0, 5))
 
-        self.note_content_display = scrolledtext.ScrolledText(right_frame, wrap=tk.WORD, font=self.font_code,
+        # Frame para el gutter y el área de notas
+        notes_frame = ttk.Frame(right_frame, style='TFrame')
+        notes_frame.pack(pady=2, fill=tk.BOTH, expand=True)
+
+        # Gutter de selección (Text widget, no editable)
+        self.gutter = tk.Text(notes_frame, width=3, height=10, font=self.font_code,
+                              bg=self.panel_bg, fg=self.accent_color, bd=0, relief="flat",
+                              state=tk.DISABLED, highlightthickness=0)
+        self.gutter.pack(side=tk.LEFT, fill=tk.Y)
+        self.gutter.bind("<Button-1>", self.on_gutter_click)
+
+        # Área de notas (ScrolledText)
+        self.note_content_display = scrolledtext.ScrolledText(notes_frame, wrap=tk.WORD, font=self.font_code,
                                                                bg=self.text_input_bg, fg=self.fg_color,
                                                                insertbackground=self.fg_color,
                                                                highlightbackground=self.border_color, highlightthickness=1,
                                                                bd=0, relief="flat", padx=5, pady=5, height=10)
-        self.note_content_display.pack(pady=2, fill=tk.BOTH, expand=True)
+        self.note_content_display.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Botón para confirmar selección
+        self.confirm_selection_btn = ttk.Button(right_frame, text="Confirmar selección de tareas", command=self.confirm_selected_tasks)
+        self.confirm_selection_btn.pack(pady=2, fill=tk.X)
 
         for role, color in self.role_colors.items():
             self.note_content_display.tag_config(role, foreground=color)
@@ -776,13 +792,17 @@ class NotesApp:
         """
         self.note_content_display.config(state=tk.NORMAL)
         self.note_content_display.delete(1.0, tk.END)
+        self.gutter.config(state=tk.NORMAL)
+        self.gutter.delete(1.0, tk.END)
 
-        for line, tag in content_lines_with_tags:
+        for idx, (line, tag) in enumerate(content_lines_with_tags):
+            # Gutter: muestra "☐" o "☑" según si está seleccionada
+            mark = "☑" if idx in self.selected_lines else "☐"
+            self.gutter.insert(tk.END, f"{mark}\n")
             # Si estamos filtrando (el tag no es "general_text"), colorea toda la línea con ese tag
             if tag != "general_text":
                 self.note_content_display.insert(tk.END, line + "\n", tag)
                 continue
-
             temp_line = line
             # Detectar y colorear todos los roles al inicio
             while True:
@@ -817,26 +837,23 @@ class NotesApp:
             self.note_content_display.insert(tk.END, temp_line + "\n", tag_to_apply)
 
         self.note_content_display.config(state=tk.DISABLED)
+        self.gutter.config(state=tk.DISABLED)
 
-    def set_display_mode(self, mode):
-        """
-        Establece el modo de visualización para "Mostrar Todo".
-        'mode' puede ser "role" o "eisenhower".
-        Al seleccionar, limpia los filtros de rol y eisenhower.
-        """
-        self.display_mode = mode
+    def on_gutter_click(self, event):
+        # Detecta la línea clickeada y alterna su selección
+        index = self.gutter.index(f"@{event.x},{event.y}")
+        line_num = int(index.split('.')[0]) - 1
+        if line_num in self.selected_lines:
+            self.selected_lines.remove(line_num)
+        else:
+            self.selected_lines.add(line_num)
+        self.show_all_content()  # Redibuja para actualizar los iconos
 
-        # Limpiar filtros de roles
-        for role in self.selected_roles.copy():
-            self.role_buttons[role].configure(style=f'Role.{role}.TButton')
-        self.selected_roles.clear()
-
-        # Limpiar filtros de eisenhower
-        for category_key in self.selected_eisenhowers.copy():
-            self.eisenhower_buttons[category_key].configure(style=f'Eisenhower.{category_key}.TButton')
-        self.selected_eisenhowers.clear()
-
-        self.show_all_content()
+    def confirm_selected_tasks(self):
+        # Ejemplo: muestra las líneas seleccionadas
+        content = self.note_content_display.get(1.0, tk.END).split('\n')
+        selected_tasks = [content[i] for i in self.selected_lines if i < len(content)]
+        messagebox.showinfo("Tareas seleccionadas", "\n".join(selected_tasks), parent=self.master)
 
     def show_all_content(self):
         if not self.active_note_title:
@@ -956,60 +973,6 @@ class NotesApp:
         if self.calendar_app_instance:
             self.calendar_app_instance.master.destroy()
             self.calendar_app_instance = None # Limpiar la referencia
-
-    def toggle_role_filter(self, role):
-        if role in self.selected_roles:
-            self.selected_roles.remove(role)
-            self.role_buttons[role].configure(style=f'Role.{role}.TButton')
-        else:
-            self.selected_roles.add(role)
-            # Cambia el fondo para indicar selección
-            selected_style = f'Role.{role}.Selected.TButton'
-            self.style.configure(selected_style, background=self.accent_color, foreground='white')
-            self.role_buttons[role].configure(style=selected_style)
-        self.apply_role_filters()
-
-    def toggle_eisenhower_filter(self, category_key):
-        if category_key in self.selected_eisenhowers:
-            self.selected_eisenhowers.remove(category_key)
-            self.eisenhower_buttons[category_key].configure(style=f'Eisenhower.{category_key}.TButton')
-        else:
-            self.selected_eisenhowers.add(category_key)
-            selected_style = f'Eisenhower.{category_key}.Selected.TButton'
-            self.style.configure(selected_style, background=self.accent_color, foreground='white')
-            self.eisenhower_buttons[category_key].configure(style=selected_style)
-        self.apply_role_filters()
-
-    def apply_role_filters(self):
-        if not self.active_note_title:
-            self.display_content([("Selecciona una nota para ver su contenido.", "general_text")])
-            return
-        if not self.selected_roles and not self.selected_eisenhowers:
-            self.show_all_content()
-            return
-        content, msg = self.notes_manager.get_note_content(self.active_note_title)
-        if content:
-            lines = content.split('\n')
-            display_data = []
-            for line in lines:
-                detected_classifications = self.notes_manager.get_line_classification(line)
-                matched = False
-                for d_type, d_name in detected_classifications:
-                    if d_type == "role" and d_name in self.selected_roles:
-                        display_data.append((line, d_name))
-                        matched = True
-                        break
-                    elif d_type == "eisenhower" and d_name in self.selected_eisenhowers:
-                        display_data.append((line, "EISENHOWER_" + d_name))
-                        matched = True
-                        break
-                # Si quieres mostrar líneas generales cuando no hay match, omite este else
-            if display_data:
-                self.display_content(display_data)
-            else:
-                self.display_content([("No se encontraron líneas para los filtros seleccionados.", "general_text")])
-        else:
-            self.display_content([(msg, "general_text")])
 
 # --- Aplicación Principal (para lanzar ambas ventanas) ---
 class MainApplication:
